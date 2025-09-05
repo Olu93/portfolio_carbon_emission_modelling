@@ -2,7 +2,7 @@
 
 A comprehensive machine learning pipeline architecture for carbon emission modeling and portfolio analysis.
 
-> **📋 Technical Report**: `Portfolio__Carbon_Emission_Modelling.pdf` (in the repo root) covers all theoretical aspects of the carbon emission modelling approach, including methodology, algorithms, and mathematical foundations.
+> **📋 Technical Report**: [Carbon_Emission_Modelling.pdf](`./Carbon_Emission_Modelling.pdf`) (in the repo root) covers all theoretical aspects of the carbon emission modelling approach, including methodology, algorithms, and mathematical foundations.
 
 ## Overview
 
@@ -178,4 +178,4 @@ This project is proprietary software. All rights reserved.
 
 ---
 
-For detailed technical specifications and methodology, refer to the comprehensive technical report: `Portfolio__Carbon_Emission_Modelling.pdf`
+For detailed technical specifications and methodology, refer to the comprehensive technical report: `Carbon_Emission_Modelling.pdf`
