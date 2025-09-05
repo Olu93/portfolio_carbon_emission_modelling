@@ -33,9 +33,9 @@ if __name__ == "__main__":
     # dataset = DefaultDataManager(scope_loader=S3ScopeLoader(), financial_loader=S3FinancialLoader(), categorical_loader=S3CategoricalLoader()).run()
     # dataset = DefaultDataManager().run()
     dataset = PreviousScopeFeaturesDataManager(
-        S3Datasource(path='model-data/input/scopes_auto.csv'),
-        LocalDatasource(path='model-data/input/financials_auto.csv'),
-        S3Datasource(path='model-data/input/categoricals_auto.csv'),
+        S3Datasource(path='model-data/input/scopes.csv'),
+        LocalDatasource(path='model-data/input/financials.csv'),
+        S3Datasource(path='model-data/input/categoricals.csv'),
         [RegionLoader()]
     ).run()
     DATA = dataset.get_data_by_name(OxariDataManager.ORIGINAL)
@@ -50,7 +50,7 @@ if __name__ == "__main__":
     dp1 = DefaultPipeline(
         preprocessor=IIDPreprocessor(),
         feature_reducer=AgglomerateFeatureReducer(),
-        imputer=RevenueQuantileBucketImputer(buckets_number=3),
+        imputer=RevenueQuantileBucketImputer(num_buckets=3),
         scope_estimator=SupportVectorEstimator(n_trials=1, n_startup_trials=1),
         ci_estimator=BaselineConfidenceEstimator(),
         scope_transformer=LogTargetScaler(),

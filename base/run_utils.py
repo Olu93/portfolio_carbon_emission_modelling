@@ -1,4 +1,6 @@
-from base.dataset_loader import OxariDataManager
+from base.common import OxariMetaModel
+from base.dataset_loader import OxariDataManager, StatisticalLoader
+from datasources.core import ExchangeBasedDeduplicatedPreviousScopeFeaturesDataManager
 from lar_calculator.lar_model import OxariUnboundLAR
 from postprocessors.missing_year_imputers import CubicSplineMissingYearImputer, DerivativeMissingYearImputer, SimpleMissingYearImputer
 from postprocessors.scope_imputers import JumpRateEvaluator, ScopeImputerPostprocessor
@@ -12,27 +14,39 @@ from datasources import PreviousScopeFeaturesDataManager
 
 def get_default_datamanager_configuration():
     return PreviousScopeFeaturesDataManager(
-        FinancialLoader(datasource=CachingS3Datasource(path="model-data/input/financials_auto.csv")),
-        ScopeLoader(datasource=CachingS3Datasource(path="model-data/input/scopes_auto.csv")),
-        CategoricalLoader(datasource=CachingS3Datasource(path="model-data/input/categoricals_auto.csv")),
+        FinancialLoader(datasource=CachingS3Datasource(path="model-data/input/financials.csv")),
+        ScopeLoader(datasource=CachingS3Datasource(path="model-data/input/scopes.csv")),
+        CategoricalLoader(datasource=CachingS3Datasource(path="model-data/input/categoricals.csv")),
+        StatisticalLoader(datasource=CachingS3Datasource(path="model-data/input/statisticals.csv")),
+        RegionLoader(),
+    )
+
+def get_deduplicated_datamanager_configuration():
+    return ExchangeBasedDeduplicatedPreviousScopeFeaturesDataManager(
+        FinancialLoader(datasource=CachingS3Datasource(path="model-data/input/financials.csv")),
+        ScopeLoader(datasource=CachingS3Datasource(path="model-data/input/scopes.csv")),
+        CategoricalLoader(datasource=CachingS3Datasource(path="model-data/input/categoricals.csv")),
+        StatisticalLoader(datasource=CachingS3Datasource(path="model-data/input/statisticals.csv")),
         RegionLoader(),
     )
 
 
 def get_remote_datamanager_configuration():
     return PreviousScopeFeaturesDataManager(
-        FinancialLoader(datasource=S3Datasource(path="model-data/input/financials_auto.csv")),
-        ScopeLoader(datasource=S3Datasource(path="model-data/input/scopes_auto.csv")),
-        CategoricalLoader(datasource=S3Datasource(path="model-data/input/categoricals_auto.csv")),
+        FinancialLoader(datasource=S3Datasource(path="model-data/input/financials.csv")),
+        ScopeLoader(datasource=S3Datasource(path="model-data/input/scopes.csv")),
+        CategoricalLoader(datasource=S3Datasource(path="model-data/input/categoricals.csv")),
+        StatisticalLoader(datasource=S3Datasource(path="model-data/input/statisticals.csv")),
         RegionLoader(),
     )
 
 
 def get_small_datamanager_configuration(frac=0.1):
     return PreviousScopeFeaturesDataManager(
-        FinancialLoader(datasource=CachingS3Datasource(path="model-data/input/financials_auto.csv")),
-        ScopeLoader(datasource=CachingS3Datasource(path="model-data/input/scopes_auto.csv")),
-        CategoricalLoader(datasource=CachingS3Datasource(path="model-data/input/categoricals_auto.csv")),
+        FinancialLoader(datasource=CachingS3Datasource(path="model-data/input/financials.csv")),
+        ScopeLoader(datasource=CachingS3Datasource(path="model-data/input/scopes.csv")),
+        CategoricalLoader(datasource=CachingS3Datasource(path="model-data/input/categoricals.csv")),
+        StatisticalLoader(datasource=CachingS3Datasource(path="model-data/input/statisticals.csv")),
         RegionLoader(),
     ).set_filter(CompanyDataFilter(frac=frac))
 
@@ -41,6 +55,14 @@ def impute_missing_years(data: pd.DataFrame):
     print("\n", "Missing Year Imputation")
     my_imputer = SimpleMissingYearImputer().fit(data)
     data = my_imputer.transform(data)
+    return data
+
+def impute_reported_scope_values(data: pd.DataFrame):
+    print("\n", "Missing Year Imputation")
+    scope_cols = ["tg_numc_scope_1", "tg_numc_scope_2", "tg_numc_scope_3"]
+    grp_cols = ["meta_name", "key_year"]
+    scopes = data.groupby(grp_cols)[grp_cols+scope_cols].ffill().groupby(grp_cols)[grp_cols+scope_cols].bfill()
+    data[scope_cols] = scopes[scope_cols]
     return data
 
 
@@ -63,3 +85,13 @@ def compute_jump_rates(imputed_data):
     jump_rate_evaluator = JumpRateEvaluator().fit(imputed_data)
     jump_rates = jump_rate_evaluator.transform(imputed_data)
     return jump_rate_evaluator, jump_rates
+
+
+def create_run_report(stage="p", today="No-Time", model_si:OxariMetaModel=None, model_lp:OxariMetaModel=None):
+    print("Eval results")
+    results = []
+    if model_si:
+        results.append(pd.json_normalize(model_si.collect_eval_results()))
+    if model_lp:
+        results.append(pd.json_normalize(model_lp.collect_eval_results()))
+    pd.concat(results).T.to_csv(f'local/prod_runs/{stage}_model_pipelines_{today}.csv')

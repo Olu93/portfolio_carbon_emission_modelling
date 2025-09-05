@@ -14,7 +14,7 @@ from pipeline.core import DefaultPipeline
 from postprocessors.missing_year_imputers import DerivativeMissingYearImputer
 from postprocessors.scope_imputers import ScopeImputerPostprocessor
 from preprocessors.core import IIDPreprocessor
-from scope_estimators.svm import SupportVectorEstimator
+from scope_estimators.svm import FastSupportVectorEstimator, SupportVectorEstimator
 
 
 
@@ -45,8 +45,8 @@ def const_pipeline(const_data_manager: OxariDataManager):
     dp1 = DefaultPipeline(
         preprocessor=IIDPreprocessor(),
         feature_reducer=PCAFeatureReducer(),
-        imputer=RevenueQuantileBucketImputer(buckets_number=5),
-        scope_estimator=SupportVectorEstimator(n_trials=1, n_startup_trials=1),
+        imputer=RevenueQuantileBucketImputer(num_buckets=5),
+        scope_estimator=FastSupportVectorEstimator(n_trials=1, n_startup_trials=1),
         ci_estimator=BaselineConfidenceEstimator(),
         scope_transformer=LogTargetScaler(),
     ).optimise(*SPLIT_1.train).fit(*SPLIT_1.train).evaluate(*SPLIT_1.rem, *SPLIT_1.val).fit_confidence(*SPLIT_1.train)
@@ -88,9 +88,9 @@ def const_meta_model(const_data_manager: OxariDataManager, const_pipeline: Oxari
 @pytest.fixture
 def const_base_loaders():
     return [
-        FinancialLoader(datasource=CachingS3Datasource(path="model-data/input/financials_auto.csv")),
-        ScopeLoader(datasource=CachingS3Datasource(path="model-data/input/scopes_auto.csv")),
-        CategoricalLoader(datasource=CachingS3Datasource(path="model-data/input/categoricals_auto.csv")),
+        FinancialLoader(datasource=CachingS3Datasource(path="model-data/input/financials.csv")),
+        ScopeLoader(datasource=CachingS3Datasource(path="model-data/input/scopes.csv")),
+        CategoricalLoader(datasource=CachingS3Datasource(path="model-data/input/categoricals.csv")),
     ]
 
 

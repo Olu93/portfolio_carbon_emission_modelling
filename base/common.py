@@ -124,6 +124,18 @@ class DefaultRegressorEvaluator(OxariEvaluator):
         # y_pred[np.isinf(y_pred)] = 10e12
         offsets = np.array(np.maximum(y_pred, y_true) / np.minimum(y_pred, y_true))
         percentile_deviation = np.quantile(offsets, [.5, .75, .90, .95])
+
+        # accuracies = np.minimum(100.0, 100.0 * np.abs(1 - np.abs((y_true - y_pred) / y_true)))
+        accuracies = (offsets*100)-100
+        accuracy_range_assignments = pd.cut(accuracies, [0, 10, 20, 50, 100, 200, np.inf], right=True)
+        accuracy_range_assignments_cnts = accuracy_range_assignments.value_counts()
+        confidence_rating = {f"<{k.right}%" if i==0 else f">{k.left}%" if i==len(accuracy_range_assignments_cnts)-1 else f"{int(k.left)}-{int(k.right)}%" :v for i, (k, v) in enumerate(accuracy_range_assignments_cnts.to_dict().items())}
+        confidence_rating_detailed =  {i:{"left":k.left, "right":k.right, "cnt":v} for i, (k, v) in enumerate(accuracy_range_assignments_cnts.to_dict().items())}
+        # confidence_rating = {
+        #     label: np.sum((accuracies < threshold) if threshold else (accuracies >= 50))
+        #     for threshold, label in accuracy_ranges
+        # }
+
         # NOTE MAPE: Important interpretation https://medium.com/@davide.sarra/how-to-interpret-smape-just-like-mape-bf799ba03bdc
         # NOTE R2: Why it's useless https://data.library.virginia.edu/is-r-squared-useless/
         # NOTE RMSE: Tends to grow with sample size, which is undesirable https://medium.com/human-in-a-machine-world/mae-and-rmse-which-metric-is-better-e60ac3bde13d
@@ -134,12 +146,9 @@ class DefaultRegressorEvaluator(OxariEvaluator):
                     "RMSE": mean_squared_error(y_true, y_pred, squared=False),
                     # "RMSLE": mean_squared_log_error(y_true, y_pred, squared=False),
                     "MAPE": mape(y_true, y_pred),
-                    "offset_percentile": {
-                        "50%": percentile_deviation[0],
-                        "75%": percentile_deviation[1],
-                        "90%": percentile_deviation[2],
-                        "95%": percentile_deviation[3]
-                    },
+                    "offset_percentile": {f"{p}%": percentile_deviation[i] for i, p in enumerate([50, 75, 90, 95])},
+                    "confidence_rating": confidence_rating,
+                    "confidence_rating_detailed": confidence_rating_detailed
         }
         print(f"Here's the sMAPE value of the regressor evaluator: {smape(y_true, y_pred) / 100}")
         # self.logger.info(f'sMAPE value of model evaluation: {smape(y_true, y_pred) / 100}')
@@ -392,18 +401,15 @@ class OxariImputer(OxariMixin, _base._BaseImputer, abc.ABC):
         super().__init__(missing_values=missing_values, add_indicator=add_indicator)
         self.verbose = verbose
         self.copy = copy
+        self._evaluation_results = {}
+        self._features_transformed = []
         evaluator = kwargs.pop('evaluator', OxariImputer.DefaultImputerEvaluator())
         self.set_evaluator(evaluator)
 
     @abc.abstractmethod
     def fit(self, X:ArrayLike, y=None, **kwargs) -> Self:
-        # Takes X and y and trains regressor.
-        # Include If X.shape[0] == y.shape[0]: raise ValueError(f�X and y do not have the same size (f{X.shape[0]} != f{X.shape[0]})�).
-        # Set self.n_features_in_ = X.shape[1]
-        # Avoid setting X and y as attributes. Only increases the model size.
-        # When fit is called, any previous call to fit should be ignored.
-        # Attributes that have been estimated from the data must always have a name ending with trailing underscore. (e.g.: self.coef_)
-        # Reference: https://scikit-learn.org/stable/developers/develop.html#fitting
+        if isinstance(X, pd.DataFrame):
+            self._features_transformed = list(X.columns)
         return self
 
     @abc.abstractmethod
@@ -414,21 +420,25 @@ class OxariImputer(OxariMixin, _base._BaseImputer, abc.ABC):
         # TODO: also include supervised methods R² into eval
         p = kwargs.pop('p', 0.3)
 
-        X_true = X.dropna(how='any')
+        # X_true = X.dropna(how='any')
+        X_true = X.copy()
         X_true_features = X_true.filter(regex="^ft_num", axis=1)
         ft_cols = X_true_features.columns
 
         rows, cols = X_true_features.shape
-        mask = ~(np.random.rand(rows, cols) < p)
+        available_points_mask = ~np.isnan(X_true_features).values
+        removal_mask = (np.random.rand(rows, cols) < p)
+
+        mask = available_points_mask & removal_mask
 
         X_eval = X_true.copy()
 
-        X_eval[ft_cols] = np.where(mask, X_true[ft_cols], np.nan)
+        X_eval[ft_cols] = np.where(mask, np.nan, X_true[ft_cols])
         X_pred = self.transform(X_eval, **kwargs)
 
-        y_true = X_true[ft_cols].values[np.where(~mask)]
-        y_pred = X_pred[ft_cols].values[np.where(~mask)] + np.finfo(float).eps
-        self._evaluation_results = {}
+        y_true = X_true[ft_cols].values[np.where(mask)]
+        y_pred = X_pred[ft_cols].values[np.where(mask)] + np.finfo(float).eps
+        
         self._evaluation_results["overall"] = self._evaluator.evaluate(y_true, y_pred)
         return self
 
@@ -437,7 +447,10 @@ class OxariImputer(OxariMixin, _base._BaseImputer, abc.ABC):
         return {"imputer": self.name, **self._evaluation_results}
         # self.logger.info(f'sMAPE value of model evaluation: {smape(y_true, y_pred) / 100}')
 
-
+    def clone(self) -> Self:
+        # TODO: Might introduce problems with bidirectional associations between objects. Needs better conceptual plan.
+        return copy.deepcopy(self, {})
+    
 
 
 class OxariPreprocessor(OxariTransformer, abc.ABC):
@@ -690,8 +703,11 @@ class OxariPipeline(OxariRegressor, MetaEstimatorMixin, abc.ABC):
         # self.resources_postprocessor = database_deployer
 
     def _preprocess(self, X, **kwargs) -> ArrayLike:
+        self.logger.info(f"Preprocess data using {self.preprocessor.__class__}")
         X_new = self.preprocessor.transform(X, **kwargs)
+        self.logger.info(f"Select feature subset using {self.feature_selector.__class__}")
         X_new = self.feature_selector.transform(X_new, **kwargs)
+        # self.feature_names_in_ = self.feature_selector.feature_names_in_
         return X_new
 
     def _transform_scope(self, y, **kwargs) -> ArrayLike:
@@ -715,10 +731,15 @@ class OxariPipeline(OxariRegressor, MetaEstimatorMixin, abc.ABC):
         # return_raw = kwargs.pop('return_raw', False) #
 
         # This is some feature cleanups to handle unexpected cases (feature format, missing features, unseen features) during inference
+        self.logger.info(f"Converting input from {type(X)} to pandas.DataFrame...")
         X_mod = self._convert_input(X)
+        self.logger.info(f"Extending missing features in input...")
         X_mod = self._extend_missing_features(X_mod, self.feature_names_in_)
+        self.logger.info(f"Removing unseen features from input...")
         X_mod = self._remove_unseen_features(X_mod, self.feature_names_in_)
+        self.logger.info(f"Order input according to 'model.feature_names_in_' ...")
         X_mod  = self._order_features(X_mod, self.feature_names_in_)
+        self.logger.info(f"Executing prediction...")
         if return_std:
             preds = self.ci_estimator.predict(X_mod, **kwargs)
             return preds  # Alread reversed
@@ -778,6 +799,13 @@ class OxariPipeline(OxariRegressor, MetaEstimatorMixin, abc.ABC):
 
     def evaluate(self, X_train, y_train, X_test, y_test) -> OxariPipeline:
         st = time.time()
+        self._evaluation_results = self._evaluate(X_train, y_train, X_test, y_test)
+        et = time.time()
+        elapsed_time = et - st
+        self.logger.info(f'Evaluate function is completed with execution time: {elapsed_time} seconds')
+        return self
+    
+    def _evaluate(self, X_train, y_train, X_test, y_test) -> dict:
         X_test = self._preprocess(X_test)
         X_train = self._preprocess(X_train)
         y_pred_test = self.estimator.predict(X_test)
@@ -785,15 +813,14 @@ class OxariPipeline(OxariRegressor, MetaEstimatorMixin, abc.ABC):
         y_pred_test_reversed = self._reverse_scope(y_pred_test)
         y_test_transformed = self._transform_scope(y_test)
         y_train_transformed = self._transform_scope(y_train)
-        self._evaluation_results = {}
-        self._evaluation_results["raw"] = self._evaluator.evaluate(y_test, y_pred_test_reversed, X_test=X_test)
-        self._evaluation_results["test"] = self.estimator.evaluate(y_test_transformed, y_pred_test, X_test=X_test)
-        self._evaluation_results["train"] = self.estimator.evaluate(y_train_transformed, y_pred_train, X_test=X_train)
+
+        _evaluation_results = {}
+        _evaluation_results["raw"] = self._evaluator.evaluate(y_test, y_pred_test_reversed, X_test=X_test)
+        _evaluation_results["test"] = self.estimator.evaluate(y_test_transformed, y_pred_test, X_test=X_test)
+        _evaluation_results["train"] = self.estimator.evaluate(y_train_transformed, y_pred_train, X_test=X_train)
         self.logger.info(f'sMAPE value of model evaluation: {smape(y_test_transformed, y_pred_test) / 100}')
-        et = time.time()
-        elapsed_time = et - st
-        self.logger.info(f'Evaluate function is completed with execution time: {elapsed_time} seconds')
-        return self
+
+        return _evaluation_results
 
     def clone(self) -> Self:
         # TODO: Might introduce problems with bidirectional associations between objects. Needs better conceptual plan.
@@ -813,15 +840,18 @@ class OxariPipeline(OxariRegressor, MetaEstimatorMixin, abc.ABC):
         
         # Convert the input variable to a pandas DataFrame
         if isinstance(X, pd.Series):
-            X = X.to_frame().T
+            X = X.to_frame().T.fillna(value=np.nan)
         elif isinstance(X, dict):
-            X = pd.DataFrame(X, index=[0])
+            X = pd.DataFrame(X, index=[0]).fillna(value=np.nan)
         elif isinstance(X, list) and all(isinstance(item, dict) for item in X):
-            X = pd.DataFrame(X)
+            X = pd.DataFrame(X).fillna(value=np.nan)
+        # elif isinstance(X, np.ndarray) and X.shape[1] == len(self.feature_names_in_):
+        #     X = pd.DataFrame(X, columns=self.feature_names_in_)
+            
         elif not isinstance(X, pd.DataFrame):
             raise ValueError("The input variable X must be a pandas Series, DataFrame, dictionary, or list of dictionaries.")
         
-        return X
+        return X.fillna(value=np.nan)
 
     def _extend_missing_features(self, df: pd.DataFrame, feature_names: List[str]) -> pd.DataFrame:
         """
@@ -839,11 +869,11 @@ class OxariPipeline(OxariRegressor, MetaEstimatorMixin, abc.ABC):
             return df.copy()
         
         if len(missing_features):
-            self.logger.warning(f"Features {list(missing_features)} were missing in the input. They are filled with 'None'. ")
+            self.logger.warning(f"{len(missing_features)}/{len(feature_names)} Features {list(missing_features)} were missing in the input. They are filled with 'None'. ")
 
             
         # Create a new DataFrame with the same index and the missing feature columns filled with None
-        missing_features_df = pd.DataFrame(columns=list(missing_features), index=df.index)
+        missing_features_df = pd.DataFrame(columns=list(missing_features), index=df.index).infer_objects()
         
         # Concatenate the input DataFrame and the missing features DataFrame
         extended_df = pd.concat([df, missing_features_df], axis=1)
@@ -858,10 +888,11 @@ class OxariPipeline(OxariRegressor, MetaEstimatorMixin, abc.ABC):
         # Find the missing feature columns
         additional_features = set(df.columns) - set(feature_names) 
         if not len(additional_features):
+            self.logger.info('No unseen features found.')
             return df.copy()
         
         if len(additional_features):
-            self.logger.warning(f"Features {list(additional_features)} were never seen during training. They are removed. ")
+            self.logger.warning(f"{len(additional_features)} Features {list(additional_features)} were never seen during training. They are removed. ")
 
             
         
@@ -873,17 +904,8 @@ class OxariPipeline(OxariRegressor, MetaEstimatorMixin, abc.ABC):
     def _order_features(self, X: pd.DataFrame, feature_names) -> pd.DataFrame:
         return X[feature_names]
 
-class Test(OxariPipeline):
-
-    def evaluate(self, X_train, y_train, X_test, y_test) -> Self:
-        self.this_is_a_test = True
-        return super().evaluate(X_train, y_train, X_test, y_test)
-
-
-class TestTest(OxariPipeline):
-
-    def evaluate(self, X_train, y_train, X_test, y_test) -> Self:
-        return super().evaluate(X_train, y_train, X_test, y_test)
+    def get_features(self) -> ArrayLike:
+        return self.feature_selector.feature_names_in_
 
 
 class OxariConfidenceEstimator(OxariScopeEstimator, MultiOutputMixin):
@@ -1008,9 +1030,10 @@ class OxariMetaModel(OxariRegressor, MultiOutputMixin, abc.ABC):
         # X_aligned = self._convert_input(X)
         # X_new = X_aligned.filter(regex='^ft', axis=1)
         if scope == "all":
-            # X_extended = self._extend_missing_features(X_new, self.feature_names_in_)
+            self.logger.info('Predict all scopes')
             return self._predict_all(X, **kwargs)
         # X_extended = self._extend_missing_features(X_new, self.get_pipeline(scope).feature_names_in_)
+        self.logger.info(f'Predict scope {scope}')
         return self.get_pipeline(scope).predict(X, **kwargs)
 
     def get_features(self, scope:int=None) -> ArrayLike:
@@ -1020,7 +1043,7 @@ class OxariMetaModel(OxariRegressor, MultiOutputMixin, abc.ABC):
                 all_features.extend(estimator.feature_names_in_)
             return list(set(all_features))
         pipeline = self.get_pipeline(scope)
-        return pipeline.feature_names_in_
+        return pipeline.get_features()
 
     @property
     def feature_names_in_(self):
@@ -1037,8 +1060,10 @@ class OxariMetaModel(OxariRegressor, MultiOutputMixin, abc.ABC):
             return result
 
         for scope_str, pipeline in self.pipelines.items():
+            self.logger.info(f'Predicting {scope_str}...')
             y_pred = pipeline.predict(X, **kwargs)
             result[scope_str] = y_pred
+            self.logger.info(f'Done with {scope_str}...')
         return result
 
     def collect_eval_results(self) -> List[dict]:
@@ -1048,6 +1073,27 @@ class OxariMetaModel(OxariRegressor, MultiOutputMixin, abc.ABC):
             results.append({"scope": scope, **pipeline.evaluation_results})
 
         return results
+    
+    def evaluate(self, X_train, y_train, X_test, y_test, M) -> Self:
+        sub_eval_results = []
+
+        for scope, pipeline in self.pipelines.items():
+            res = pipeline._evaluate(X_train, y_train[f"tg_numc_{scope}"], X_test, y_test[f"tg_numc_{scope}"])
+            sub_eval_results.append(res)
+
+        scope_results = [result["raw"] for result in sub_eval_results]
+
+        self.statistics = {
+            "performance": {metric: {f"scope_{i+1}": result[metric] for i, result in enumerate(scope_results)} for metric in ["sMAPE", "MAE"]},
+            "confidence_rating": {f"scope_{i+1}": result["confidence_rating"] for i, result in enumerate(scope_results)},
+            "confidence_rating_detailed": {f"scope_{i+1}": result["confidence_rating_detailed"] for i, result in enumerate(scope_results)},
+            "meta": {
+                "num_rows_tested": M.shape[0],
+                "num_companies_tested": M['key_ticker'].nunique()
+            }
+        }
+
+        return self
 
     # def _convert_input(self, X:dict|pd.Series|pd.DataFrame|list[dict]):
     #     """

@@ -34,9 +34,9 @@ if __name__ == "__main__":
     # dataset = DefaultDataManager(scope_loader=S3ScopeLoader(), financial_loader=S3FinancialLoader(), categorical_loader=S3CategoricalLoader()).run()
     # dataset = DefaultDataManager().run()
     dataset = DefaultDataManager(
-        S3Datasource(path='model-input-data/scopes_auto.csv'),
-        S3Datasource(path='model-input-data/financials_auto.csv'),
-        S3Datasource(path='model-input-data/categoricals_auto.csv'),
+        S3Datasource(path='model-input-data/scopes.csv'),
+        S3Datasource(path='model-input-data/financials.csv'),
+        S3Datasource(path='model-input-data/categoricals.csv'),
         other_loaders=[NetZeroIndexLoader()],
     ).run()
     # dataset = PreviousScopeFeaturesDataManager().run()
@@ -52,7 +52,7 @@ if __name__ == "__main__":
     dp1 = DefaultPipeline(
         preprocessor=IIDPreprocessor(),
         feature_reducer=GaussRandProjectionFeatureReducer(),
-        imputer=RevenueQuantileBucketImputer(buckets_number=3),
+        imputer=RevenueQuantileBucketImputer(num_buckets=3),
         scope_estimator=SupportVectorEstimator(),
         ci_estimator=BaselineConfidenceEstimator(),
         scope_transformer=LogTargetScaler(),

@@ -15,6 +15,12 @@ def replace_ft_num(X:pd.DataFrame, X_new:ArrayLike):
     X_tmp[X.filter(regex='^ft_num', axis=1).columns] = X_new
     return X_tmp
 
+def convert_to_df(X_new:ArrayLike, X_old:pd.DataFrame):
+    if not isinstance(X_old,pd.DataFrame):
+        raise Exception("Reference is not a Dataframe")
+
+    return pd.DataFrame(X_new, index=X_old.index, columns=X_old.columns)
+
 def mock_data():
     data = data_point()
     df = pd.Series(data).to_frame().T.sort_index(axis=1)
@@ -48,7 +54,7 @@ def data_point(drop_rate:float=0.0):
         "ft_numc_prior_tg_numc_scope_2": 50033,
         "ft_numc_prior_tg_numc_scope_3": 11111,
         "key_year": 2019.0,
-        "key_isin": "FR0000051070",
+        "key_ticker": "FR0000051070",
         "tg_numc_scope_1": None,
         "tg_numc_scope_2": None,
         "tg_numc_scope_3": None,
@@ -137,7 +143,7 @@ class LogTargetScaler(OxariScopeTransformer):
         return np.log1p(y.copy())
 
     def reverse_transform(self, y, **kwargs) -> ArrayLike:
-        transfomed_y = np.expm1(y.copy())
+        transfomed_y = np.expm1(y.copy().astype(float))
         # This is a failsafe in case the model spits out a number waaaay too high and np.expm1 becomes infinite
         position_inf = np.isinf(transfomed_y)
         transfomed_y[position_inf] = np.finfo(float).max
@@ -150,10 +156,10 @@ class ArcSinhTargetScaler(OxariScopeTransformer):
         super().__init__(**kwargs)
 
     def transform(self, y, **kwargs) -> ArrayLike:
-        return np.arcsinh(y.copy())
+        return np.arcsinh(y.copy().astype(float))
 
     def reverse_transform(self, y, **kwargs) -> ArrayLike:
-        return np.sinh(y.copy())
+        return np.sinh(y.copy().astype(float))
 
 
 class DummyTargetScaler(OxariScopeTransformer):
@@ -171,10 +177,10 @@ class ArcSinhScaler(OxariFeatureTransformer):
         super().__init__(**kwargs)
 
     def transform(self, X, y=None, **kwargs) -> ArrayLike:
-        return np.arcsinh(X.copy())
+        return np.arcsinh(X.copy().astype(float))
 
     def reverse_transform(self, X, **kwargs) -> ArrayLike:
-        return np.sinh(X.copy())
+        return np.sinh(X.copy().astype(float))
 
 
 class DummyFeatureScaler(OxariFeatureTransformer):

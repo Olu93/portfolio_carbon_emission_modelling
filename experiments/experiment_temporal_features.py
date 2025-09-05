@@ -7,14 +7,17 @@ import numpy as np
 
 from base import MAPIEConfidenceEstimator, OxariDataManager, BaselineConfidenceEstimator, DirectLossConfidenceEstimator, PercentileOffsetConfidenceEstimator, DummyConfidenceEstimator, ConformalKNNConfidenceEstimator, JacknifeConfidenceEstimator
 from base.common import DefaultRegressorEvaluator
-from base.dataset_loader import CategoricalLoader, CompanyDataFilter, FinancialLoader, ScopeLoader
+from base.dataset_loader import CategoricalLoader, CompanyDataFilter, FinancialLoader, ScopeLoader, StatisticalLoader
 from datasources.core import PreviousScopeFeaturesDataManager, TemporalFeaturesDataManager
 from base.run_utils import get_default_datamanager_configuration, get_remote_datamanager_configuration, get_small_datamanager_configuration
 from datasources.loaders import RegionLoader
 from datasources.local import LocalDatasource
+from datasources.online import CachingS3Datasource
 from feature_reducers import PCAFeatureReducer
 # from imputers.revenue_bucket import RevenueBucketImputer
+from feature_reducers.core import DummyFeatureReducer
 from imputers import RevenueQuantileBucketImputer
+from imputers.core import DummyImputer
 from pipeline.core import DefaultPipeline
 from preprocessors import IIDPreprocessor
 from scope_estimators import MiniModelArmyEstimator, SupportVectorEstimator
@@ -49,7 +52,7 @@ def evaluate_jump_rates(ppl1, data):
     scope_keys = list(data.columns[data.columns.str.startswith('tg_numc_')])
     data = data[meta_keys + scope_keys + ["meta_is_pred_s1"]]
 
-    companies = data.groupby('key_isin', group_keys=True)
+    companies = data.groupby('key_ticker', group_keys=True)
     jump_rates: pd.DataFrame = companies.progress_apply(compute_jump_rates).reset_index().drop('level_1', axis=1).reset_index()
     jr_series = jump_rates["tg_numc_scope_1"].replace([np.inf, -np.inf], np.nan)
     jr_results = {
@@ -77,9 +80,10 @@ if __name__ == "__main__":
 
     for i in range(num_repeats):
         dataset = TemporalFeaturesDataManager(
-            FinancialLoader(datasource=LocalDatasource(path="model-data/input/financials_auto.csv")),
-            ScopeLoader(datasource=LocalDatasource(path="model-data/input/scopes_auto.csv")),
-            CategoricalLoader(datasource=LocalDatasource(path="model-data/input/categoricals_auto.csv")),
+            FinancialLoader(datasource=CachingS3Datasource(path="model-data/input/financials.csv")),
+            ScopeLoader(datasource=CachingS3Datasource(path="model-data/input/scopes.csv")),
+            CategoricalLoader(datasource=CachingS3Datasource(path="model-data/input/categoricals.csv")),
+            StatisticalLoader(datasource=CachingS3Datasource(path="model-data/input/statisticals.csv")),
             RegionLoader(),
         ).set_filter(CompanyDataFilter(0.25, drop_single_rows=True)).run()  # run() calls _transform()
         evaluator = DefaultRegressorEvaluator()
@@ -112,8 +116,8 @@ if __name__ == "__main__":
 
             ppl1 = DefaultPipeline(
                 preprocessor=IIDPreprocessor(fin_transformer=PowerTransformer()),
-                feature_reducer=PCAFeatureReducer(),
-                imputer=RevenueQuantileBucketImputer(),
+                feature_reducer=DummyFeatureReducer(),
+                imputer=DummyImputer(),
                 scope_estimator=MiniModelArmyEstimator(),
                 ci_estimator=None,
                 scope_transformer=LogTargetScaler(),

@@ -142,10 +142,12 @@ class EmptyLoader(PartialLoader):
 
 
 class CombinedLoader(PartialLoader):
+    SUFFIXES = (None, "_DROP")
 
     def __init__(self, _data: pd.DataFrame = None, **kwargs) -> None:
         super().__init__(**kwargs)
         self._data = _data
+        self._cols_drop = []
 
     def merge(self, loader_1: PartialLoader = None, loader_2: PartialLoader = None):
         tmp_data: pd.DataFrame = None
@@ -154,16 +156,26 @@ class CombinedLoader(PartialLoader):
         if isinstance(loader_2, SpecialLoader):
             self.logger.info(f"Merging special loader {loader_2.name} to {loader_1.name}")
             special_loader: SpecialLoader = loader_2
-            tmp_data = loader_1.data.merge(special_loader.data, left_on=special_loader.lkeys, right_on=special_loader.rkeys, how="left").sort_values(special_loader.lkeys)
+            tmp_data = loader_1.data.merge(special_loader.data, left_on=special_loader.lkeys, right_on=special_loader.rkeys, how="left", suffixes=self.SUFFIXES).sort_values(special_loader.lkeys)
         if not isinstance(loader_2, SpecialLoader):
             common_keys = list(set(loader_1.keys).intersection(loader_2.keys))
-            tmp_data = loader_1.data.merge(loader_2.data, on=common_keys, how="left").sort_values(common_keys)
+            tmp_data = loader_1.data.merge(loader_2.data, on=common_keys, how="left", suffixes=self.SUFFIXES).sort_values(common_keys)
         self._data = tmp_data
         return self
 
     @property
     def name(self):
         return self._name.strip()
+    
+    # def load(self, **kwargs) -> Self:
+    #     super().load(**kwargs)
+    #     self._cols_all = list(self._data.columns)
+    #     self._cols_drop = self._cols_all[list(self._data.columns.str.endswith(self.SUFFIXES[1]))]
+    #     return self
+    
+    # @property
+    # def data(self) -> pd.DataFrame:
+    #     return self._data.drop(columns=self._cols_drop, errors='ignore')
 
 
 class OldScopeLoader(PartialLoader):
@@ -206,11 +218,11 @@ class ScopeLoader(SpecialLoader):
 
     @property
     def lkeys(self):
-        return ["key_isin", "key_year"]
+        return ["key_ticker", "key_year"]
 
     @property
     def rkeys(self):
-        return ["key_isin", "key_year"]
+        return ["key_ticker", "key_year"]
 
 class OldFinancialLoader(PartialLoader):
     PATTERN = "ft_num"
@@ -229,9 +241,18 @@ class FinancialLoader(PartialLoader):
     def _load(self, **kwargs) -> Self:
         super()._load(**kwargs)
         #
-        self._data = self._data.dropna(subset=["key_year", "key_isin"], how='any')
+        self._data = self._data.dropna(subset=["key_year", "key_ticker"], how='any')
         self._data["key_year"] = self._data["key_year"].astype(int)
         self._data = drop_sparse_rows(self._data) 
+        return self
+
+class StatisticalLoader(PartialLoader):
+    PATTERN = "ft_num"
+
+    def _load(self, **kwargs) -> Self:
+        super()._load(**kwargs)
+        #
+        self._data = self._data.dropna(subset=["key_ticker"], how='any')
         return self
 
 
@@ -245,6 +266,8 @@ class CategoricalLoader(PartialLoader):
     @property
     def data(self):
         return self._data[self.columns]
+
+
 
 
 class SplitBag():
@@ -308,7 +331,7 @@ class SplitScopeDataset():
         columns = self.data.columns.difference(self.non_features)
         X = self.data.dropna(how="all", subset=scope_col).copy()
         X = X[X[scope_col] > 0]
-        return SplitBag(X[columns], X[scope_col], self.split_size_test, self.split_size_test)
+        return SplitBag(X[columns], X[scope_col], self.split_size_val, self.split_size_test)
 
 
 class DataFilter(OxariTransformer):
@@ -340,13 +363,13 @@ class CompanyDataFilter(DataFilter):
 
     def transform(self, X: ArrayLike, **kwargs) -> ArrayLike:
         if self.drop_single_rows:
-            group_counts = X.groupby('key_isin').size()
-            X = X.groupby('key_isin').filter(lambda x: group_counts[x.name] > 1)
-        isins = X["key_isin"].unique()
+            group_counts = X.groupby('key_ticker').size()
+            X = X.groupby('key_ticker').filter(lambda x: group_counts[x.name] > 1)
+        isins = X["key_ticker"].unique()
         self.num_companies_pre = len(isins)
         isin_subset = pd.Series(isins).sample(frac=self.frac).values
-        X_new = X[X["key_isin"].isin(isin_subset)]
-        self.num_companies_post = len(X_new["key_isin"].unique())
+        X_new = X[X["key_ticker"].isin(isin_subset)]
+        self.num_companies_post = len(X_new["key_ticker"].unique())
         self.logger.debug(f'Filtered dataset from {self.num_companies_pre} to {self.num_companies_post} companies')
         self.logger.info(f'Filtered dataset from {len(X)} to {len(X_new)} data points')
         return X_new
@@ -397,7 +420,7 @@ class OxariDataManager(OxariMixin):
             self.add_data(loader_name, loader.data, loaded.name)
             self.add_data(f"merge_stage_{idx}", merged_loader.data, merged_loader.name)
             # TODO: take len of loader directly
-            self.logger.info(f"Remaining data points {len(merged_loader.data)}")
+            self.logger.info(f"Remaining data points {merged_loader.data.shape}")
 
         _df_merged = self.add_data(OxariDataManager.MERGED, merged_loader.data, "Dataset with all parts merged.")
         _df_reduced = self.add_data(OxariDataManager.REDUCED, self.data_filter.fit_transform(_df_merged), "Dataset with reduced number of rows.")
@@ -409,10 +432,11 @@ class OxariDataManager(OxariMixin):
         self.col_others = list(_df_original.columns.difference(self.col_targets).difference(self.col_features))
         return self
 
-    #TODO: JUST OVERWRITE THIS ONE
-    def _transform(self, df:pd.DataFrame, **kwargs):
+    def _transform(self, df:pd.DataFrame, **kwargs) -> pd.DataFrame:
         # key_cols = list(df.columns[df.columns.str.startswith('key')])
-        return df.drop_duplicates(['key_isin', 'key_year']).sort_values(['key_isin', 'key_year'], ascending=True)
+        df = df.drop_duplicates(['key_ticker', 'key_year']).sort_values(['key_ticker', 'key_year'], ascending=True)
+        df = df.drop(columns=df.filter(regex='_DROP$', axis=1).columns)
+        return df 
 
     def add_data(self, name: str, df: pd.DataFrame, descr: str = "") -> pd.DataFrame:
         self.logger.info(f"Added {name} to {self.__class__.__name__}")
@@ -516,3 +540,7 @@ class OxariDataManager(OxariMixin):
     def set_filter(self, filter: DataFilter) -> Self:
         self.data_filter = filter
         return self
+
+    # def add_filter(self, filter: DataFilter) -> Self:
+    #     self.data_filter = filter
+    #     return self

@@ -29,8 +29,10 @@ class DummyFeatureReducer(OxariFeatureReducer):
         self.logger.info(f'Reduces features from {self.n_components_} to {self.n_components_} columns. ')
         return self
 
-    def transform(self, X, **kwargs) -> ArrayLike:
+    def transform(self, X:pd.DataFrame, **kwargs) -> ArrayLike:
+        self.logger.info(f'Reduces features from {len(X.columns)} to {len(X.columns)} columns. ')
         return X
+
 
 
 class DropFeatureReducer(OxariFeatureReducer):
@@ -50,7 +52,8 @@ class DropFeatureReducer(OxariFeatureReducer):
         return self
 
     def transform(self, X: pd.DataFrame, **kwargs) -> ArrayLike:
-        new_X = X.drop(columns=self._features)
+        new_X = X.drop(columns=self._features, errors='ignore')
+        self.logger.info(f'Reduces features from {len(X[self.feature_names_in_].columns)} columns to {len(new_X.columns)} columns.')
         return new_X
 
 class SelectionFeatureReducer(OxariFeatureReducer):
@@ -73,6 +76,30 @@ class SelectionFeatureReducer(OxariFeatureReducer):
     def transform(self, X: pd.DataFrame, **kwargs) -> ArrayLike:
         X_reduced = X[self.selected_features_]
         # TODO: add merge function with metadata
+        self.logger.info(f'Reduces features from {len(X[self.feature_names_in_].columns)} columns to {len(X_reduced.columns)} columns.')
+        return X_reduced
+
+class DropFeatureReducer(OxariFeatureReducer):
+    """ This Feature Selector selects features according to a list of predefined features. 
+    This is useful if a supervised feature selection algorithm was used. 
+    """
+
+    def __init__(self, features=[], **kwargs):
+        super().__init__(**kwargs)
+        self._features = features
+
+    def fit(self, X: pd.DataFrame, y=None, **kwargs) -> Self:
+        self.feature_names_in_ = list(X.filter(regex="^ft_", axis=1).columns)
+        features_set = set(self._features)
+        self.selected_features_ = [col for col in X.columns if col not in features_set]
+        self.n_components_ = len(self.selected_features_)
+        self.logger.info(f'Reduces features from {len(X[self.feature_names_in_].columns)} columns to {self.n_components_} columns.')
+        return self
+
+    def transform(self, X: pd.DataFrame, **kwargs) -> ArrayLike:
+        X_reduced = X[self.selected_features_]
+        # TODO: add merge function with metadata
+        self.logger.info(f'Reduces features from {len(X[self.feature_names_in_].columns)} columns to {len(X_reduced.columns)} columns.')
         return X_reduced
 
 
@@ -98,6 +125,7 @@ class PCAFeatureReducer(OxariFeatureReducer):
         X_reduced = pd.DataFrame(self._dimensionality_reducer.transform(X_new), index=X_new.index)
         X_new_reduced = self.merge(X_new, X_reduced)
         X_complete = self.merge_with_ignored_columns(X, X_new_reduced)
+        self.logger.info(f'Reduces features from {len(X[self.feature_names_in_].columns)} columns to {len(X_complete.columns)} columns.')
         return X_complete
 
     def get_params(self, deep=False):
@@ -106,6 +134,9 @@ class PCAFeatureReducer(OxariFeatureReducer):
     def get_config(self, deep=True):
         return {'estimator': self._dimensionality_reducer.get_params(deep), **super().get_config(deep)}
 
+class DismissNonExplainingFeatureReducer(PCAFeatureReducer):
+    # TODO: Will compute pca and the features that explain the variance the most without actual reduction
+    pass
 
 class AgglomerateFeatureReducer(PCAFeatureReducer):
 
@@ -119,7 +150,9 @@ class AgglomerateFeatureReducer(PCAFeatureReducer):
         return self
 
     def transform(self, X: pd.DataFrame, **kwargs) -> ArrayLike:
-        return super().transform(X, **kwargs)
+        X_reduced = super().transform(X, **kwargs)
+        self.logger.info(f'Reduces features from {len(X[self.feature_names_in_].columns)} columns to {len(X_reduced.columns)} columns.')
+        return X_reduced
 
 
 #The SKlearnFeatureReducerWrapperMixin was not an argument in the original iteration of this

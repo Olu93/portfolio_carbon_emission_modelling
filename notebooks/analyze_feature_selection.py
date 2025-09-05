@@ -32,8 +32,8 @@ from preprocessors import IIDPreprocessor
 from scope_estimators import SupportVectorEstimator
 # %%
 # dataset = DefaultDataManager(scope_loader=S3ScopeLoader(), financial_loader=S3FinancialLoader(), categorical_loader=S3CategoricalLoader()).run()
-dataset = DefaultDataManager(S3Datasource(path='model-input-data/scopes_auto.csv'), S3Datasource(path='model-input-data/financials_auto.csv'),
-                             S3Datasource(path='model-input-data/categoricals_auto.csv')).run()
+dataset = DefaultDataManager(S3Datasource(path='model-input-data/scopes.csv'), S3Datasource(path='model-input-data/financials.csv'),
+                             S3Datasource(path='model-input-data/categoricals.csv')).run()
 # dataset = PreviousScopeFeaturesDataManager().run()
 DATA = dataset.get_data_by_name(OxariDataManager.ORIGINAL)
 bag = dataset.get_split_data(OxariDataManager.ORIGINAL)
@@ -44,7 +44,7 @@ SPLIT_3 = bag.scope_3
 dp1 = DefaultPipeline(
     preprocessor=IIDPreprocessor(),
     feature_reducer=IsomapDimensionalityFeatureReducer(10),
-    imputer=RevenueQuantileBucketImputer(buckets_number=5),
+    imputer=RevenueQuantileBucketImputer(num_buckets=5),
     scope_estimator=SupportVectorEstimator(),
     ci_estimator=BaselineConfidenceEstimator(),
     scope_transformer=LogTargetScaler(),

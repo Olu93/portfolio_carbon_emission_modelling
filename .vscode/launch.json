@@ -36,14 +36,7 @@
       "name": "DEV Saver",
       "type": "python",
       "request": "launch",
-      "module": "development.run_saver",
-      "justMyCode": true
-    },
-    {
-      "name": "Run Parallel Pipeline",
-      "type": "python",
-      "request": "launch",
-      "module": "main_test_estimators_parallel",
+      "module": "main_save_search_db",
       "justMyCode": true
     },
     {
@@ -64,8 +57,8 @@
       "name": "Run Specific Experiment",
       "type": "python",
       "request": "launch",
-      "module": "experiments.experiment_SMA_vs_MMA",
-      "justMyCode": true
+      "module": "experiments.experiment_missing_value_imputers_downstream_task_validation",
+      "justMyCode": false
     },
     {
       "name": "Test All",

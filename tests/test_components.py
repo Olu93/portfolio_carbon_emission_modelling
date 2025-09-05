@@ -4,19 +4,19 @@ import pytest
 from base.common import OxariPreprocessor, OxariFeatureReducer, OxariImputer
 from base.helper import LogTargetScaler
 from feature_reducers.core import AgglomerateFeatureReducer, DummyFeatureReducer, PCAFeatureReducer
-from imputers.categorical import CategoricalStatisticsImputer
-from imputers.core import DummyImputer
+from imputers.categorical import CategoricalStatisticsImputer, HybridCategoricalStatisticsImputer
+from imputers.core import BaselineImputer, DummyImputer
 from imputers.iterative import MVEImputer
-from imputers.kcluster_bucket import KMeansBucketImputer, KMedianBucketImputer
+from imputers.kcluster_bucket import KNNBucketImputer, KMedianBucketImputer
 from imputers.revenue_bucket import RevenueBucketImputer, RevenueQuantileBucketImputer
-from preprocessors.core import BaselinePreprocessor, DummyPreprocessor, IIDPreprocessor, ImprovedBaselinePreprocessor, NormalizedIIDPreprocessor
+from preprocessors.core import BaselinePreprocessor, DummyPreprocessor, FastIndustryNormalisationBaselinePreprocessor, IIDPreprocessor, ImprovedBaselinePreprocessor, NormalizedIIDPreprocessor
 from base.dataset_loader import OxariDataManager
 from tests.fixtures import const_data_manager, const_pipeline, const_meta_model, const_example_df, const_example_df_multi_rows, const_example_dict, const_example_dict_multi_rows, const_example_series, const_dataset_filtered, const_data_for_scope_imputation
 import numpy as np
 import pandas as pd
 
 
-@pytest.mark.parametrize("preprocessor", [IIDPreprocessor(), BaselinePreprocessor(), ImprovedBaselinePreprocessor(), NormalizedIIDPreprocessor()])
+@pytest.mark.parametrize("preprocessor", [IIDPreprocessor(), BaselinePreprocessor(), ImprovedBaselinePreprocessor(), NormalizedIIDPreprocessor(), FastIndustryNormalisationBaselinePreprocessor()])
 def test_preprocessors(preprocessor: OxariPreprocessor, const_data_manager: OxariDataManager):
     bag = const_data_manager.get_split_data(OxariDataManager.ORIGINAL)
     SPLIT_1 = bag.scope_1
@@ -38,9 +38,10 @@ def test_feature_reducers(feature_reducer: OxariFeatureReducer, const_data_manag
     RevenueBucketImputer(),
     RevenueQuantileBucketImputer(),
     CategoricalStatisticsImputer(),
-    KMeansBucketImputer(),
-    KMedianBucketImputer(),
-    MVEImputer(),
+    KNNBucketImputer(),
+    DummyImputer(),
+    BaselineImputer(),
+    HybridCategoricalStatisticsImputer(),
 ])
 def test_imputers(imputer: OxariImputer, const_dataset_filtered: pd.DataFrame):
     data_prep: pd.DataFrame = imputer.fit_transform(const_dataset_filtered)
